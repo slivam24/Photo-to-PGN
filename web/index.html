@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Partiář do PGN</title>
+<meta name="description" content="Přepis šachového partiáře z fotky nebo skenu do PGN.">
+<style>
+:root {
+  --bg: #f3f5f2; --surface: #ffffff; --fg: #1d2420; --muted: #5d6a62; --line: #d5ddd7;
+  --accent: #2f6b4f; --accent-fg: #ffffff; --accent-soft: #e2efe7; --warn: #a8461f;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141a17; --surface: #1d2521; --fg: #e4ebe6; --muted: #98a69d; --line: #33403a;
+    --accent: #6fbf94; --accent-fg: #0f1a14; --accent-soft: #233a2e; --warn: #f08a5d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141a17; --surface: #1d2521; --fg: #e4ebe6; --muted: #98a69d; --line: #33403a;
+  --accent: #6fbf94; --accent-fg: #0f1a14; --accent-soft: #233a2e; --warn: #f08a5d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-ui); }
+main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 16px; }
+header h1 { margin: 0; font-size: 24px; letter-spacing: -.01em; }
+header p { margin: 4px 0 0; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.card h2 { margin: 0; font-size: 17px; }
+.note { margin: 0; font-size: 13px; color: var(--muted); }
+.note a { color: var(--accent); }
+label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+input[type=password], input[type=text], textarea { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; min-width: 0; }
+textarea { font-family: var(--font-mono); font-size: 13px; min-height: 180px; resize: vertical; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.btn { font: inherit; font-weight: 500; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 9px 14px; cursor: pointer; min-height: 42px; display: inline-flex; align-items: center; gap: 6px; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.thumbs { display: flex; gap: 10px; flex-wrap: wrap; }
+.thumb { position: relative; width: 112px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.thumb img { display: block; width: 100%; height: 140px; object-fit: cover; }
+.thumb .pdf { height: 140px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--muted); }
+.thumb .tools { display: flex; justify-content: space-between; padding: 4px; }
+.thumb button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+.status { margin: 0; font-size: 14px; min-height: 1.4em; }
+.status.err { color: var(--warn); }
+.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; vertical-align: -2px; margin-right: 6px; }
+@media (prefers-reduced-motion: no-preference) { .spin { animation: spin 1s linear infinite; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.result { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.photos { display: grid; gap: 8px; align-content: start; }
+.photos img { width: 100%; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+@media (min-width: 900px) {
+  .result { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .photos-card { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+}
+details.photos-card summary { cursor: pointer; font-weight: 600; }
+footer { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Partiář do PGN</h1>
+    <p>Vyfoť nebo naskenuj zapsaný partiář. Claude ho přečte, aplikace ověří každý tah podle pravidel a nejistá místa ti ukáže ke kontrole.</p>
+  </header>
+
+  <section class="card" aria-labelledby="hKey">
+    <h2 id="hKey">Klíč k Claude API</h2>
+    <label class="field">Klíč (začíná sk-ant-)
+      <input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+    </label>
+    <label class="check"><input type="checkbox" id="rememberKey" checked> Zapamatovat v tomto prohlížeči</label>
+    <p class="note">Klíč získáš na <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a>. Zůstává jen v tvém prohlížeči a posílá se jen přímo do Claude API spolu s fotkou. Přečtení jednoho partiáře stojí obvykle kolem 0,10 až 0,30 USD.</p>
+  </section>
+
+  <section class="card" aria-labelledby="hPhoto">
+    <h2 id="hPhoto">Fotka partiáře</h2>
+    <div class="row">
+      <button class="btn" type="button" id="takePhoto">Vyfotit</button>
+      <button class="btn" type="button" id="pickFiles">Vybrat soubory</button>
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+      <input type="file" id="fileInput" accept="image/*,application/pdf" multiple hidden>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+    <p class="note">Nejlépe celý list rovně shora, bez stínu a ostře. Fotka nebo PDF, nejvýš 4 strany (obě strany partiáře nebo víc listů jedné partie).</p>
+    <div class="row">
+      <button class="btn primary" type="button" id="readBtn" disabled>Přečíst partiář</button>
+      <button class="btn" type="button" id="cancelBtn" hidden>Zrušit</button>
+    </div>
+    <p class="status" id="status" role="status"></p>
+  </section>
+
+  <div class="result" id="result" hidden>
+    <section class="card" aria-labelledby="hReview">
+      <h2 id="hReview">Kontrola tahů</h2>
+      <div id="review"></div>
+    </section>
+    <details class="card photos-card" id="photosCard" open>
+      <summary>Fotka pro porovnání</summary>
+      <div class="photos" id="photos"></div>
+    </details>
+  </div>
+
+  <section class="card" id="pgnCard" aria-labelledby="hPgn" hidden>
+    <h2 id="hPgn">PGN</h2>
+    <label class="check"><input type="checkbox" id="markUncertain"> Označit nejisté tahy komentářem v PGN</label>
+    <label class="check"><input type="checkbox" id="czechView" checked> Zobrazovat tahy česky (J, S, V, D, K)</label>
+    <textarea id="pgnOut" readonly spellcheck="false" aria-label="Výsledné PGN"></textarea>
+    <div class="row">
+      <button class="btn primary" type="button" id="copyBtn">Kopírovat PGN</button>
+      <button class="btn" type="button" id="downloadBtn">Stáhnout .pgn</button>
+    </div>
+    <p class="note" id="costNote"></p>
+  </section>
+
+  <footer>Photo-to-PGN · čtení přes Claude API (Anthropic), kontrola tahů knihovnou chess.js · GNU GPL 3</footer>
+</main>
+
+<script src="chess.js"></script>
+<script src="anthropic-sdk.js"></script>
+<script src="scoresheet-core.js"></script>
+<script src="scoresheet-reader.js"></script>
+<script src="scoresheet-review.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const KEY = 'photo-to-pgn-key';
+  let files = [];
+  let controller = null;
+
+  try { const k = localStorage.getItem(KEY); if (k) $('apiKey').value = k; } catch (e) {}
+  function saveKey() {
+    try {
+      if ($('rememberKey').checked && $('apiKey').value.trim()) localStorage.setItem(KEY, $('apiKey').value.trim());
+      else localStorage.removeItem(KEY);
+    } catch (e) {}
+  }
+  $('apiKey').addEventListener('change', saveKey);
+  $('rememberKey').addEventListener('change', saveKey);
+
+  function status(text, kind) {
+    const s = $('status');
+    s.textContent = '';
+    s.className = 'status' + (kind === 'err' ? ' err' : '');
+    if (kind === 'busy') s.append(Object.assign(document.createElement('span'), { className: 'spin' }));
+    s.append(text || '');
+  }
+
+  function renderThumbs() {
+    const box = $('thumbs');
+    box.textContent = '';
+    files.forEach((f, i) => {
+      const t = document.createElement('div');
+      t.className = 'thumb';
+      if (f.kind === 'image') { const img = document.createElement('img'); img.src = f.preview; img.alt = 'Strana ' + (i + 1); t.append(img); }
+      else { const d = document.createElement('div'); d.className = 'pdf'; d.textContent = 'PDF'; t.append(d); }
+      const tools = document.createElement('div');
+      tools.className = 'tools';
+      if (f.kind === 'image') {
+        const r = document.createElement('button');
+        r.type = 'button'; r.textContent = '↻'; r.title = 'Otočit'; r.setAttribute('aria-label', 'Otočit stranu ' + (i + 1));
+        r.onclick = async () => { files[i] = await ScoresheetReader.rotateImage(files[i]); renderThumbs(); };
+        tools.append(r);
+      } else tools.append(document.createElement('span'));
+      const x = document.createElement('button');
+      x.type = 'button'; x.textContent = '✕'; x.title = 'Odebrat'; x.setAttribute('aria-label', 'Odebrat stranu ' + (i + 1));
+      x.onclick = () => { files.splice(i, 1); renderThumbs(); };
+      tools.append(x);
+      t.append(tools);
+      box.append(t);
+    });
+    $('readBtn').disabled = !files.length;
+  }
+
+  async function addFiles(list) {
+    for (const f of list) {
+      if (files.length >= ScoresheetReader.MAX_FILES) { status('Najednou jde poslat nejvýš ' + ScoresheetReader.MAX_FILES + ' strany.', 'err'); break; }
+      try { files.push(await ScoresheetReader.prepareFile(f)); }
+      catch (e) { status(e.message, 'err'); }
+    }
+    renderThumbs();
+  }
+  $('takePhoto').onclick = () => $('cameraInput').click();
+  $('pickFiles').onclick = () => $('fileInput').click();
+  ['cameraInput', 'fileInput'].forEach(id => $(id).addEventListener('change', e => { addFiles([...e.target.files]); e.target.value = ''; }));
+
+  const review = ScoresheetReview.create($('review'), { czech: true, onChange: updatePgn });
+  function updatePgn() { $('pgnOut').value = review.getPgn({ markUncertain: $('markUncertain').checked }); }
+  $('markUncertain').addEventListener('change', updatePgn);
+  $('czechView').addEventListener('change', e => review.setCzech(e.target.checked));
+
+  $('readBtn').addEventListener('click', async () => {
+    const apiKey = $('apiKey').value.trim();
+    if (!apiKey) { status('Nejdřív vlož klíč k Claude API.', 'err'); $('apiKey').focus(); return; }
+    saveKey();
+    controller = new AbortController();
+    $('readBtn').disabled = true; $('cancelBtn').hidden = false;
+    const t0 = Date.now();
+    let last = 'Odesílám…';
+    const timer = setInterval(() => status(last + ' ' + Math.round((Date.now() - t0) / 1000) + ' s', 'busy'), 1000);
+    status(last, 'busy');
+    try {
+      const r = await ScoresheetReader.read({ apiKey, files, signal: controller.signal, onProgress: t => { last = t; status(t, 'busy'); } });
+      review.load(r.data);
+      const photos = $('photos'); photos.textContent = '';
+      files.filter(f => f.kind === 'image').forEach((f, i) => { const img = document.createElement('img'); img.src = f.preview; img.alt = 'Partiář, strana ' + (i + 1); photos.append(img); });
+      $('photosCard').hidden = !photos.childElementCount;
+      $('result').hidden = false; $('pgnCard').hidden = false;
+      updatePgn();
+      const cost = ScoresheetReader.estimateCost(r.usage);
+      $('costNote').textContent = cost != null ? 'Čtení trvalo ' + Math.round((Date.now() - t0) / 1000) + ' s, přibližná cena ' + cost.toFixed(2) + ' USD.' : '';
+      status('Hotovo. Zkontroluj zvýrazněné tahy.');
+      $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      status(e.message, 'err');
+    } finally {
+      clearInterval(timer);
+      controller = null;
+      $('readBtn').disabled = !files.length; $('cancelBtn').hidden = true;
+    }
+  });
+  $('cancelBtn').addEventListener('click', () => { if (controller) controller.abort(); });
+
+  $('copyBtn').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('pgnOut').value); status('PGN zkopírováno.'); }
+    catch (e) { $('pgnOut').select(); status('Zkopíruj označený text ručně.'); }
+  });
+  $('downloadBtn').addEventListener('click', () => {
+    const h = review.getHeaders();
+    const nm = (h.white || 'bily').split(',')[0] + '-' + (h.black || 'cerny').split(',')[0];
+    const name = nm.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9-]+/g, '_') + '.pgn';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([$('pgnOut').value], { type: 'application/x-chess-pgn' }));
+    a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "photo-to-pgn",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Přepis šachového partiáře z fotky nebo skenu do PGN (Claude API + kontrola tahů podle pravidel).",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0"
+  },
+  "devDependencies": {
+    "chess.js": "0.10.3",
+    "esbuild": "0.25.12"
+  }
+}
