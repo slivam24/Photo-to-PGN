@@ -157,20 +157,47 @@
     const tableTop = Math.min(...numCols.map(c => c.a + c.b * (c.from - 0.5)));
     const tableBottom = Math.max(...numCols.map(c => c.a + c.b * (c.to + 0.5)));
     const labelWords = new Set(findLabels(words).map(l => l.text + '@' + l.cx + ',' + l.cy));
+    // Geometrie pro šikmou nebo perspektivně zkreslenou fotku:
+    //  - sklon sloupců: poloha čísla tahu ve sloupci x = xc + xd·n,
+    //  - sklon řádků: řádek k v levém bloku a řádek k v pravém bloku leží na stejné tištěné čáře.
+    numCols.forEach(c => {
+      const ts = c.tokens, mn = ts.reduce((a, t) => a + t.n, 0) / ts.length, mx = ts.reduce((a, t) => a + t.cx, 0) / ts.length;
+      const sxx = ts.reduce((a, t) => a + (t.n - mn) ** 2, 0);
+      c.xd = sxx ? ts.reduce((a, t) => a + (t.n - mn) * (t.cx - mx), 0) / sxx : 0;
+      c.xc = mx - c.xd * mn;
+    });
+    const numX = (c, n) => c.xc + c.xd * n;
+    const numY = (c, n) => c.a + c.b * n;
+    function slopeAt(c, n) {
+      const k = n - c.from;
+      const partners = numCols.filter(p => p !== c && p.to - p.from === c.to - c.from);
+      if (!partners.length) return globalSlope;
+      const p = partners.sort((u, v) => Math.abs(numX(v, v.from) - numX(c, c.from)) - Math.abs(numX(u, u.from) - numX(c, c.from)))[0];
+      const m = p.from + k, dx = numX(p, m) - numX(c, n);
+      return Math.abs(dx) > 1 ? (numY(p, m) - numY(c, n)) / dx : 0;
+    }
+    let globalSlope = 0;
+    globalSlope = numCols.length > 1 ? slopeAt(numCols[0], numCols[0].from + Math.round((numCols[0].to - numCols[0].from) / 2)) : 0;
+    const rowY = (c, n, x) => numY(c, n) + slopeAt(c, n) * (x - numX(c, n));
+    const colX = (c, x0, n) => x0 + c.xd * (n - (c.from - 1));
+
     const cells = new Map();
     words.forEach(w => {
       if (labelWords.has(w.text + '@' + w.cx + ',' + w.cy)) return;
       w.symbols.forEach(s => {
         if (numberSyms.has(s)) return;
-        // číslice uvnitř kteréhokoli číselného sloupce je vytištěné číslo tahu
-        if (/\d/.test(s.t) && numCols.some(c => s.cx > c.x0 - 0.3 * c.b && s.cx < c.x1 + 0.3 * c.b)) return;
-        if (s.cy < tableTop - 2 || s.cy > tableBottom + 2) return;
-        // nejbližší sloupec bílý/černý ze všech bloků
+        // číslice v kterémkoli číselném sloupci je vytištěné číslo tahu
+        if (/\d/.test(s.t) && numCols.some(c => { const n = Math.round((s.cy - c.a) / c.b), x = numX(c, n), half = (c.x1 - c.x0) / 2 + 0.3 * c.b; return Math.abs(s.cx - x) < half; })) return;
+        // nejbližší řádek a sloupec bílý/černý ze všech bloků
         let best = null;
         numCols.forEach(c => {
-          const n = Math.round((s.cy - c.a) / c.b);
-          if (n < c.from || n > c.to) return;
-          [['w', c.white], ['b', c.black]].forEach(([color, x]) => {
+          let n0 = Math.round((s.cy - c.a) / c.b), n = null, dy = Infinity;
+          for (let k = n0 - 2; k <= n0 + 2; k++) {
+            const d = Math.abs(s.cy - rowY(c, k, s.cx));
+            if (d < dy) { dy = d; n = k; }
+          }
+          if (n < c.from || n > c.to || dy > 0.75 * c.b) return;
+          [['w', colX(c, c.white, n)], ['b', colX(c, c.black, n)]].forEach(([color, x]) => {
             const d = Math.abs(s.cx - x);
             if (!best || d < best.d) best = { d, n, color };
           });
