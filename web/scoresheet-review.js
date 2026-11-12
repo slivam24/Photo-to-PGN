@@ -184,7 +184,7 @@
       const box = el('div', { class: 'ss-detail', 'aria-live': 'polite' });
       box.append(el('h4', { text: 'Tah ' + moveLabel(p) }));
       const w = p.written ? el('span', { class: 'ss-written', text: '„' + p.written + '“' }) : el('span', { text: 'nic (prázdné políčko)' });
-      const line = el('p', null, ['Na papíře: ', w]);
+      const line = el('p', null, [p.ocr ? 'OCR přečetlo: ' : 'Na papíře: ', w]);
       if (p.claude && Core.normalizeWritten(p.claude, 'english')[0] !== Core.normalizeWritten(p.san || '', 'english')[0]) line.append(', Claude četl ' + show(p.claude));
       box.append(line);
       if (!g) {
@@ -296,13 +296,19 @@
       return c;
     }
     function getHeaders() { return Object.assign({}, headers); }
+    // Zbytek zápisu, který se nepodařilo převést na tahy, jako text k ručnímu doplnění
+    function getRest() {
+      if (!res || res.stoppedAt < 0) return '';
+      const rest = res.plies.slice(res.stoppedAt).map(p => (p.color === 'w' ? p.move_number + '. ' : (p === res.plies[res.stoppedAt] ? p.move_number + '... ' : '')) + (p.written || '?'));
+      return 'Nepřečteno, doplnit ručně: ' + rest.join(' ');
+    }
     function getPgn(opts) {
-      return Core.buildPgn(headers, getSans(), { comments: opts && opts.markUncertain ? getComments() : null });
+      return Core.buildPgn(headers, getSans(), { comments: opts && opts.markUncertain ? getComments() : null, tail: getRest() });
     }
     function getStats() { return res ? stats() : null; }
     function setCzech(v) { czech = !!v; render(); }
 
-    return { load, render, getSans, getHeaders, getPgn, getComments, getStats, setCzech };
+    return { load, render, getSans, getHeaders, getPgn, getComments, getRest, getStats, setCzech };
   }
 
   root.ScoresheetReview = { create };

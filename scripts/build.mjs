@@ -20,6 +20,9 @@ for (const [from, to] of [
   ['src/scoresheet-core.js', 'web/scoresheet-core.js'],
   ['src/scoresheet-reader.js', 'web/scoresheet-reader.js'],
   ['src/scoresheet-review.js', 'web/scoresheet-review.js'],
+  ['src/ocr-layout.js', 'web/ocr-layout.js'],
+  ['src/vision-ocr.js', 'web/vision-ocr.js'],
+  ['data/zameny.json', 'web/zameny.json'],
   ['node_modules/chess.js/chess.js', 'web/chess.js']
 ]) copyFileSync(from, to);
 console.log('Hotovo: Anthropic SDK ' + sdkVersion);

@@ -149,6 +149,71 @@
     return best;
   }
 
+  /* ---------- Typické záměny OCR ---------- */
+
+  // Výchozí tabulka: znak přečtený OCR -> [[skutečný znak, váha]]; '' znamená, že znak na papíře není.
+  // Doplňuje se statistikou z fotek se známou partií (scripts/chyby.mjs, data/zameny.json).
+  const OCR_BASE = {
+    '√': [['J', 0.9]], '№': [['J', 0.9]], '7': [['J', 0.6]], '5': [['S', 0.7]], '$': [['S', 0.8]],
+    '9': [['g', 0.9]], '6': [['b', 0.8]], '&': [['b', 0.7]], '2': [['d', 0.6], ['b', 0.4]], 'α': [['d', 0.8], ['a', 0.6]],
+    '₤': [['f', 0.8]], '/': [['f', 0.5], ['', 0.5]], '<': [['c', 0.8]], '€': [['c', 0.8], ['e', 0.6]], 'C': [['c', 0.8], ['S', 0.4]],
+    'z': [['2', 0.7]], 'Z': [['2', 0.7]], 'r': [['5', 0.6]], 'B': [['D', 0.6]], 'h': [['b', 0.5]], 'k': [['K', 0.9]],
+    'l': [['1', 0.9]], 'I': [['1', 0.8]], 'o': [['0', 0.8]], 'O': [['0', 0.9]], 'U': [['V', 0.8]], 'y': [['7', 0.6]],
+    'G': [['6', 0.6]], 't': [['x', 0.6]], 'X': [['x', 0.9]], 'e': [['c', 0.4]], 'c': [['e', 0.4]], 'E': [['e', 0.7]],
+    "'": [['', 0.9]], '.': [['', 0.9]], ',': [['', 0.9]], '`': [['', 0.9]], '+': [['', 0.5]], '|': [['1', 0.5], ['', 0.5]]
+  };
+  const NOTATION_CHAR = /[a-h1-8KQRBNDVSJTLxX:+\-=#0O]/;
+  let ocrTable = OCR_BASE;
+
+  /**
+   * Doplní tabulku záměn o statistiku: counts = { přečteno: { skutečnost: počet } }
+   * (shoda se počítá jako přečteno === skutečnost). Statistika má přednost před odhadem.
+   */
+  function setOcrStats(counts) {
+    // Výchozí odhad se počítá jako PRIOR pozorování, skutečné výskyty ho postupně přebíjejí
+    const PRIOR = 3;
+    const t = {};
+    Object.keys(OCR_BASE).forEach(k => { t[k] = OCR_BASE[k].slice(); });
+    Object.keys(counts || {}).forEach(o => {
+      const row = counts[o];
+      const total = Object.values(row).reduce((a, b) => a + b, 0);
+      if (!total) return;
+      const base = new Map((OCR_BASE[o] || []).map(([c, w]) => [c, w]));
+      const keys = new Set([...base.keys(), ...Object.keys(row)]);
+      keys.delete(o);
+      const list = [];
+      keys.forEach(c => {
+        const w = ((base.has(c) ? base.get(c) : 0.3) * PRIOR + (row[c] || 0)) / (PRIOR + total);
+        if (w >= 0.05) list.push([c, Math.min(0.95, w)]);
+      });
+      list.sort((a, b) => b[1] - a[1]);
+      const keep0 = NOTATION_CHAR.test(o) ? 1 : 0.4;
+      list.keep = (keep0 * PRIOR + (row[o] || 0)) / (PRIOR + total);
+      t[o] = list;
+    });
+    ocrTable = t;
+    return t;
+  }
+
+  /** Možná skutečná znění textu přečteného OCR, s vahou: [[text, váha]], nejpravděpodobnější první. */
+  function ocrVariants(text, limit) {
+    let beams = [['', 1]];
+    for (const ch of String(text || '')) {
+      const opts = [];
+      const row = ocrTable[ch] || [];
+      const keep = row.keep != null ? Math.max(0.3, row.keep) : (NOTATION_CHAR.test(ch) ? 1 : 0.4);
+      opts.push([ch, keep]);
+      row.forEach(([c, w]) => opts.push([c, w]));
+      const next = [];
+      beams.forEach(([s, w]) => opts.forEach(([c, v]) => next.push([s + c, w * v])));
+      next.sort((a, b) => b[1] - a[1]);
+      beams = next.slice(0, 60);
+    }
+    const seen = new Map();
+    beams.forEach(([s, w]) => { if (s && (!seen.has(s) || seen.get(s) < w)) seen.set(s, w); });
+    return [...seen.entries()].slice(0, limit || 40);
+  }
+
   /* ---------- Hodnocení legálních tahů v pozici ---------- */
 
   // Kandidáti jednoho půltahu: [{ keys: [...], weight }]
@@ -157,6 +222,8 @@
     const push = (keys, w) => keys.forEach(k => { if (!best.has(k) || best.get(k) < w) best.set(k, w); });
     if (ply.san) push(normalizeWritten(ply.san, 'english'), 1);
     if (ply.written) push(normalizeWritten(ply.written, lang), 0.98);
+    // Text z OCR: vyzkoušet i znění s typickými záměnami znaků
+    if (ply.ocr && ply.written) ocrVariants(ply.written).forEach(([v, w]) => push(normalizeWritten(v, lang), 0.97 * w));
     (ply.alternatives || []).forEach(a => {
       push(normalizeWritten(a, lang), 0.85);
       if (lang !== 'english') push(normalizeWritten(a, 'english'), 0.8);
@@ -207,6 +274,8 @@
   // Zastavit přepis stojí za každý nepřiřazený půltah tolik jako shoda s jistotou STOP_SCORE.
   // Cesta se slabými shodami tak prohraje s cestou, která se poctivě zastaví a zeptá.
   const STOP_SCORE = 0.6;
+  // U textu z OCR se přijme i slabší shoda, pokud má jasný náskok před druhým nejlepším tahem
+  const MIN_SCORE_OCR = 0.2, OCR_MARGIN = 0.1;
 
   /**
    * Hlavní funkce: z přečtených půltahů složí nejpravděpodobnější platnou partii.
@@ -238,7 +307,10 @@
         }
         // Ručně vybraný tah, který po dřívější opravě není legální, se nahradí čtením z papíru
         if (!forced[i] || !scored.length) {
-          scored = scoreMoves(moves, cands[i]).filter(x => x.s >= MIN_SCORE).slice(0, 4);
+          const all = scoreMoves(moves, cands[i]);
+          scored = all.filter(x => x.s >= MIN_SCORE).slice(0, 4);
+          // Text z OCR: stačí, když je tah jasně nejlepší (zbytek pak rozhodne pokračování partie)
+          if (!scored.length && list[i].ocr && all[0] && all[0].s >= MIN_SCORE_OCR && all[0].s - (all[1] ? all[1].s : 0) >= OCR_MARGIN) scored = [all[0]];
           // Jasná shoda: druhou možnost není třeba zkoumat (výrazně zrychlí čisté zápisy)
           if (scored.length > 1 && scored[0].s >= 0.95 && scored[1].s < 0.7) scored = scored.slice(0, 1);
         }
@@ -273,7 +345,7 @@
       const item = {
         index: i, move_number: p.move_number, color: p.color,
         written: p.written || '', claude: p.san || '', confidence: p.confidence || '',
-        missing: !!p.missing,
+        missing: !!p.missing, ocr: !!p.ocr,
         san: chosen ? chosen.san : null,
         score: chosen ? chosen.s : 0,
         forced: !!(forced[i] && chosen && chosen.san === forced[i]),
@@ -283,7 +355,8 @@
       if (chosen) {
         const second = scored.find(x => x.m.san !== chosen.san);
         const margin = chosen.s - (second ? second.s : 0);
-        item.flagged = !item.forced && (chosen.s < 0.9 || margin < 0.08 || p.confidence === 'low' || p.confidence === 'medium' || !!p.missing ||
+        if (p.ocr) item.flagged = !item.forced && (chosen.s < 0.6 || margin < 0.1);
+        else item.flagged = !item.forced && (chosen.s < 0.9 || margin < 0.08 || p.confidence === 'low' || p.confidence === 'medium' || !!p.missing ||
           (p.san && normalizeWritten(p.san, 'english')[0] !== moveKeys(moves.find(m => m.san === chosen.san))[0][0]));
         g.move(chosen.san);
       } else {
@@ -295,7 +368,7 @@
         for (let j = i + 1; j < list.length; j++) {
           const q = list[j];
           out.push({ index: j, move_number: q.move_number, color: q.color, written: q.written || '', claude: q.san || '',
-            confidence: q.confidence || '', missing: !!q.missing, san: null, score: 0, flagged: true, forced: !!forced[j], options: [], legal: [] });
+            confidence: q.confidence || '', missing: !!q.missing, ocr: !!q.ocr, san: null, score: 0, flagged: true, forced: !!forced[j], options: [], legal: [] });
         }
         break;
       }
@@ -349,6 +422,7 @@
       if (comments[i]) parts.push('{' + String(comments[i]).replace(/[{}]/g, '') + '}');
       if (black) num++;
     });
+    if (options && options.tail) parts.push('{' + String(options.tail).replace(/[{}]/g, '') + '}');
     parts.push(h.Result);
     let line = '', body = '';
     parts.forEach(p => { if (line && line.length + 1 + p.length > 79) { body += line + '\n'; line = p; } else line = line ? line + ' ' + p : p; });
@@ -356,5 +430,5 @@
     return txt + '\n' + body + '\n';
   }
 
-  return { START_FEN, LANGS, normalizeWritten, moveKeys, distance, orderPlies, reconcile, buildPgn, normResult, normDate };
+  return { START_FEN, LANGS, normalizeWritten, moveKeys, distance, orderPlies, reconcile, buildPgn, normResult, normDate, ocrVariants, setOcrStats, OCR_BASE };
 });

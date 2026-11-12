@@ -1,2 +1,8 @@
 node_modules/
 scripts/out/
+# fotky partiářů a uložené odpovědi OCR se do repozitáře nedávají (autorská práva, soukromí)
+testdata/*.png
+testdata/*.jpg
+testdata/*.jpeg
+testdata/*.webp
+testdata/*.vision.json

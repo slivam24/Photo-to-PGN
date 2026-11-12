@@ -1,4 +1,4 @@
-// Zkouška celé stránky v prohlížeči bez skutečného Claude API: odpověď API se nahradí připravenou.
+// Zkouška stránky s Claudem (web/claude.html) v prohlížeči bez skutečného Claude API: odpověď API se nahradí připravenou.
 // Spuštění: node scripts/e2e-mock.mjs [složka pro snímky]
 // Ověří, že stránka pošle správný požadavek (model, obrázek, schéma) a z odpovědi složí platné PGN.
 import { createRequire } from 'node:module';
@@ -84,7 +84,7 @@ await page.route('https://api.anthropic.com/**', async route => {
   await route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'access-control-allow-origin': '*' }, body: sse(JSON.stringify(DATA)) });
 });
 
-await page.goto(`http://localhost:${port}/`);
+await page.goto(`http://localhost:${port}/claude.html`);
 await page.fill('#apiKey', 'sk-ant-test');
 await page.setInputFiles('#fileInput', sheetPath);
 await page.waitForSelector('.thumb img');

@@ -131,3 +131,26 @@ test('rychlost: 120 půltahů bez určeného jazyka', () => {
   assert.ok(ms < 5000, 'trvalo ' + ms + ' ms');
   console.log('120 půltahů:', ms, 'ms');
 });
+
+test('OCR: varianty typických záměn', () => {
+  assert.equal(S.ocrVariants('√3')[0][0], 'J3');
+  assert.equal(S.ocrVariants('S94')[0][0], 'Sg4');
+  assert.ok(S.ocrVariants('ax&5').some(([v]) => v === 'axb5'));
+});
+
+test('OCR: chyby rozpoznávání se opraví podle pravidel', () => {
+  const w = OPERA.map(toCzech);
+  w[5] = 'S94'; w[17] = '65'; w[18] = 'Jx65'; w[19] = 'cx&5'; w[13] = 'De7\''; w[22] = '0-O-0';
+  const p = plies(w).map(x => Object.assign(x, { ocr: true, confidence: 'low' }));
+  const r = S.reconcile(p, { Chess, lang: 'czech' });
+  assert.equal(r.stoppedAt, -1);
+  assert.deepEqual(r.plies.map(x => x.san), OPERA);
+  assert.ok(r.plies.filter(x => x.flagged).length <= 6, 'k ověření jen nejisté tahy');
+});
+
+test('OCR: statistika záměn doplní výchozí tabulku', () => {
+  S.setOcrStats({ 'q': { 'g': 5 }, '6': { 'b': 3, '6': 1 } });
+  assert.equal(S.ocrVariants('q4')[0][0], 'g4');
+  assert.equal(S.ocrVariants('6')[0][0], 'b');
+  S.setOcrStats({});
+});

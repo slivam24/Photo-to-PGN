@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Partiář do PGN</title>
-<meta name="description" content="Přepis šachového partiáře z fotky nebo skenu do PGN.">
+<meta name="description" content="Přepis šachového partiáře z fotky do PGN: rozpoznání textu Google Cloud Vision a kontrola tahů podle pravidel.">
 <style>
 :root {
   --bg: #f3f5f2; --surface: #ffffff; --fg: #1d2420; --muted: #5d6a62; --line: #d5ddd7;
@@ -47,6 +47,7 @@ textarea { font-family: var(--font-mono); font-size: 13px; min-height: 180px; re
 .thumbs { display: flex; gap: 10px; flex-wrap: wrap; }
 .thumb { position: relative; width: 112px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
 .thumb img { display: block; width: 100%; height: 140px; object-fit: cover; }
+select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; max-width: 280px; }
 .thumb .pdf { height: 140px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--muted); }
 .thumb .tools { display: flex; justify-content: space-between; padding: 4px; }
 .thumb button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
@@ -70,28 +71,36 @@ footer { color: var(--muted); font-size: 12px; }
 <main>
   <header>
     <h1>Partiář do PGN</h1>
-    <p>Vyfoť nebo naskenuj zapsaný partiář. Claude ho přečte, aplikace ověří každý tah podle pravidel a nejistá místa ti ukáže ke kontrole.</p>
+    <p>Vyfoť zapsaný partiář. Google Cloud Vision z něj přečte text, aplikace ho přiřadí k tahům a ověří podle pravidel. Co nejde přečíst, doplníš ručně.</p>
   </header>
 
   <section class="card" aria-labelledby="hKey">
-    <h2 id="hKey">Klíč k Claude API</h2>
-    <label class="field">Klíč (začíná sk-ant-)
-      <input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+    <h2 id="hKey">Klíč ke Google Cloud Vision</h2>
+    <label class="field">Klíč (začíná AIza)
+      <input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="AIza…">
     </label>
     <label class="check"><input type="checkbox" id="rememberKey" checked> Zapamatovat v tomto prohlížeči</label>
-    <p class="note">Klíč získáš na <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a>. Zůstává jen v tvém prohlížeči a posílá se jen přímo do Claude API spolu s fotkou. Přečtení jednoho partiáře stojí obvykle kolem 0,10 až 0,30 USD.</p>
+    <p class="note">Prvních 1000 fotek měsíčně je u Google Cloud Vision zdarma. Klíč zůstává jen v tvém prohlížeči a fotka se posílá jen do Google Cloud Vision.</p>
   </section>
 
   <section class="card" aria-labelledby="hPhoto">
     <h2 id="hPhoto">Fotka partiáře</h2>
     <div class="row">
       <button class="btn" type="button" id="takePhoto">Vyfotit</button>
-      <button class="btn" type="button" id="pickFiles">Vybrat soubory</button>
+      <button class="btn" type="button" id="pickFile">Vybrat fotku</button>
       <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
-      <input type="file" id="fileInput" accept="image/*,application/pdf" multiple hidden>
+      <input type="file" id="fileInput" accept="image/*" hidden>
     </div>
     <div class="thumbs" id="thumbs"></div>
-    <p class="note">Nejlépe celý list rovně shora, bez stínu a ostře. Fotka nebo PDF, nejvýš 4 strany (obě strany partiáře nebo víc listů jedné partie).</p>
+    <p class="note">Celý list rovně shora, ostře a bez stínu. Čísla tahů a nadpisy Bílý/Černý musí být na fotce vidět, podle nich se pozná tabulka.</p>
+    <label class="field">Notace na partiáři
+      <select id="notation">
+        <option value="czech">česká (K D V S J)</option>
+        <option value="english">anglická (K Q R B N)</option>
+        <option value="german">německá (K D T L S)</option>
+        <option value="">nevím</option>
+      </select>
+    </label>
     <div class="row">
       <button class="btn primary" type="button" id="readBtn" disabled>Přečíst partiář</button>
       <button class="btn" type="button" id="cancelBtn" hidden>Zrušit</button>
@@ -112,6 +121,7 @@ footer { color: var(--muted); font-size: 12px; }
 
   <section class="card" id="pgnCard" aria-labelledby="hPgn" hidden>
     <h2 id="hPgn">PGN</h2>
+    <p class="note">Partie je přečtená až k prvnímu tahu, který nešel určit. Zbytek zápisu je v komentáři na konci, doplníš ho v editoru.</p>
     <label class="check"><input type="checkbox" id="markUncertain"> Označit nejisté tahy komentářem v PGN</label>
     <label class="check"><input type="checkbox" id="czechView" checked> Zobrazovat tahy česky (J, S, V, D, K)</label>
     <textarea id="pgnOut" readonly spellcheck="false" aria-label="Výsledné PGN"></textarea>
@@ -119,24 +129,25 @@ footer { color: var(--muted); font-size: 12px; }
       <button class="btn primary" type="button" id="copyBtn">Kopírovat PGN</button>
       <button class="btn" type="button" id="downloadBtn">Stáhnout .pgn</button>
     </div>
-    <p class="note" id="costNote"></p>
   </section>
 
-  <footer>Photo-to-PGN · čtení přes Claude API (Anthropic), kontrola tahů knihovnou chess.js · GNU GPL 3</footer>
+  <footer>Photo-to-PGN · rozpoznání textu Google Cloud Vision, kontrola tahů knihovnou chess.js · GNU GPL 3</footer>
 </main>
 
 <script src="chess.js"></script>
-<script src="anthropic-sdk.js"></script>
 <script src="scoresheet-core.js"></script>
-<script src="scoresheet-reader.js"></script>
+<script src="ocr-layout.js"></script>
+<script src="vision-ocr.js"></script>
 <script src="scoresheet-review.js"></script>
 <script>
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
-  const KEY = 'photo-to-pgn-key';
-  let files = [];
-  let controller = null;
+  const KEY = 'photo-to-pgn-google-key';
+  let photo = null, controller = null;
+
+  // Statistika záměn OCR (data/zameny.json)
+  fetch('zameny.json').then(r => r.ok ? r.json() : null).then(j => { if (j && j.zameny) Scoresheet.setOcrStats(j.zameny); }).catch(() => {});
 
   try { const k = localStorage.getItem(KEY); if (k) $('apiKey').value = k; } catch (e) {}
   function saveKey() {
@@ -155,44 +166,27 @@ footer { color: var(--muted); font-size: 12px; }
     if (kind === 'busy') s.append(Object.assign(document.createElement('span'), { className: 'spin' }));
     s.append(text || '');
   }
-
-  function renderThumbs() {
+  function renderThumb() {
     const box = $('thumbs');
     box.textContent = '';
-    files.forEach((f, i) => {
-      const t = document.createElement('div');
-      t.className = 'thumb';
-      if (f.kind === 'image') { const img = document.createElement('img'); img.src = f.preview; img.alt = 'Strana ' + (i + 1); t.append(img); }
-      else { const d = document.createElement('div'); d.className = 'pdf'; d.textContent = 'PDF'; t.append(d); }
-      const tools = document.createElement('div');
-      tools.className = 'tools';
-      if (f.kind === 'image') {
-        const r = document.createElement('button');
-        r.type = 'button'; r.textContent = '↻'; r.title = 'Otočit'; r.setAttribute('aria-label', 'Otočit stranu ' + (i + 1));
-        r.onclick = async () => { files[i] = await ScoresheetReader.rotateImage(files[i]); renderThumbs(); };
-        tools.append(r);
-      } else tools.append(document.createElement('span'));
-      const x = document.createElement('button');
-      x.type = 'button'; x.textContent = '✕'; x.title = 'Odebrat'; x.setAttribute('aria-label', 'Odebrat stranu ' + (i + 1));
-      x.onclick = () => { files.splice(i, 1); renderThumbs(); };
-      tools.append(x);
-      t.append(tools);
-      box.append(t);
-    });
-    $('readBtn').disabled = !files.length;
-  }
-
-  async function addFiles(list) {
-    for (const f of list) {
-      if (files.length >= ScoresheetReader.MAX_FILES) { status('Najednou jde poslat nejvýš ' + ScoresheetReader.MAX_FILES + ' strany.', 'err'); break; }
-      try { files.push(await ScoresheetReader.prepareFile(f)); }
-      catch (e) { status(e.message, 'err'); }
+    if (photo) {
+      const t = document.createElement('div'); t.className = 'thumb';
+      const img = document.createElement('img'); img.src = photo.preview; img.alt = 'Fotka partiáře'; t.append(img);
+      const tools = document.createElement('div'); tools.className = 'tools'; tools.append(document.createElement('span'));
+      const x = document.createElement('button'); x.type = 'button'; x.textContent = '✕'; x.title = 'Odebrat'; x.setAttribute('aria-label', 'Odebrat fotku');
+      x.onclick = () => { photo = null; renderThumb(); };
+      tools.append(x); t.append(tools); box.append(t);
     }
-    renderThumbs();
+    $('readBtn').disabled = !photo || !!controller;
+  }
+  async function setFile(f) {
+    if (!f) return;
+    try { photo = await VisionOcr.prepareImage(f); status(''); } catch (e) { status(e.message, 'err'); }
+    renderThumb();
   }
   $('takePhoto').onclick = () => $('cameraInput').click();
-  $('pickFiles').onclick = () => $('fileInput').click();
-  ['cameraInput', 'fileInput'].forEach(id => $(id).addEventListener('change', e => { addFiles([...e.target.files]); e.target.value = ''; }));
+  $('pickFile').onclick = () => $('fileInput').click();
+  ['cameraInput', 'fileInput'].forEach(id => $(id).addEventListener('change', e => { setFile(e.target.files[0]); e.target.value = ''; }));
 
   const review = ScoresheetReview.create($('review'), { czech: true, onChange: updatePgn });
   function updatePgn() { $('pgnOut').value = review.getPgn({ markUncertain: $('markUncertain').checked }); }
@@ -201,32 +195,31 @@ footer { color: var(--muted); font-size: 12px; }
 
   $('readBtn').addEventListener('click', async () => {
     const apiKey = $('apiKey').value.trim();
-    if (!apiKey) { status('Nejdřív vlož klíč k Claude API.', 'err'); $('apiKey').focus(); return; }
+    if (!apiKey) { status('Nejdřív vlož klíč ke Google Cloud Vision.', 'err'); $('apiKey').focus(); return; }
     saveKey();
     controller = new AbortController();
     $('readBtn').disabled = true; $('cancelBtn').hidden = false;
-    const t0 = Date.now();
-    let last = 'Odesílám…';
-    const timer = setInterval(() => status(last + ' ' + Math.round((Date.now() - t0) / 1000) + ' s', 'busy'), 1000);
-    status(last, 'busy');
+    status('Rozpoznávám text…', 'busy');
     try {
-      const r = await ScoresheetReader.read({ apiKey, files, signal: controller.signal, onProgress: t => { last = t; status(t, 'busy'); } });
-      review.load(r.data);
+      const resp = await VisionOcr.annotate(photo.data, { apiKey, signal: controller.signal });
+      const lay = OcrLayout.layout(resp);
+      if (lay.error) throw new Error(lay.error + ' Vyfoť celý list i s čísly tahů.');
+      const h = lay.headers || {};
+      review.load({ headers: { white: h.white || '', black: h.black || '', event: h.event || '', site: h.site || '', date: h.date || '', round: h.round || '', result: lay.result || '' },
+        notation: $('notation').value || 'unknown', plies: lay.plies, notes: '' });
       const photos = $('photos'); photos.textContent = '';
-      files.filter(f => f.kind === 'image').forEach((f, i) => { const img = document.createElement('img'); img.src = f.preview; img.alt = 'Partiář, strana ' + (i + 1); photos.append(img); });
-      $('photosCard').hidden = !photos.childElementCount;
+      const img = document.createElement('img'); img.src = photo.preview; img.alt = 'Partiář'; photos.append(img);
       $('result').hidden = false; $('pgnCard').hidden = false;
       updatePgn();
-      const cost = ScoresheetReader.estimateCost(r.usage);
-      $('costNote').textContent = cost != null ? 'Čtení trvalo ' + Math.round((Date.now() - t0) / 1000) + ' s, přibližná cena ' + cost.toFixed(2) + ' USD.' : '';
-      status('Hotovo. Zkontroluj zvýrazněné tahy.');
+      const st = review.getStats();
+      status(st.stopped >= 0 ? 'Přečteno ' + st.done + ' půltahů automaticky. Oprav tah, u kterého se přepis zastavil, a pokračuje se dál.' : 'Přečteno všech ' + st.done + ' půltahů. Zkontroluj zvýrazněné tahy.');
       $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) {
       status(e.message, 'err');
     } finally {
-      clearInterval(timer);
       controller = null;
-      $('readBtn').disabled = !files.length; $('cancelBtn').hidden = true;
+      $('cancelBtn').hidden = true;
+      renderThumb();
     }
   });
   $('cancelBtn').addEventListener('click', () => { if (controller) controller.abort(); });
@@ -237,8 +230,8 @@ footer { color: var(--muted); font-size: 12px; }
   });
   $('downloadBtn').addEventListener('click', () => {
     const h = review.getHeaders();
-    const nm = (h.white || 'bily').split(',')[0] + '-' + (h.black || 'cerny').split(',')[0];
-    const name = nm.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9-]+/g, '_') + '.pgn';
+    const nm = (h.white || 'bily').split(/[ ,]/)[0] + '-' + (h.black || 'cerny').split(/[ ,]/)[0];
+    const name = nm.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_') + '.pgn';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([$('pgnOut').value], { type: 'application/x-chess-pgn' }));
     a.download = name;
