@@ -1,0 +1,9 @@
+{
+  "name": "photo-to-pgn",
+  "private": true,
+  "description": "Partie z fotky partiáře: Claude přečte zapsaný šachový partiář a tahy se ověří podle pravidel.",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Partie z fotky partiáře</title>
+<meta name="description" content="Claude přečte fotku zapsaného šachového partiáře, každý tah se ověří podle pravidel a výsledkem je PGN.">
+<style>
+:root {
+  --bg: #f3f5f2; --surface: #ffffff; --fg: #1d2420; --muted: #5d6a62; --line: #d5ddd7;
+  --accent: #2f6b4f; --accent-fg: #ffffff; --accent-soft: #e2efe7; --warn: #a8461f;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141a17; --surface: #1d2521; --fg: #e4ebe6; --muted: #98a69d; --line: #33403a;
+    --accent: #6fbf94; --accent-fg: #0f1a14; --accent-soft: #233a2e; --warn: #f08a5d;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-ui); }
+main { max-width: 720px; margin: 0 auto; padding: max(16px, env(safe-area-inset-top, 0px)) 16px 40px; display: grid; gap: 16px; }
+h1 { margin: 4px 0 0; font-size: 22px; font-weight: 650; }
+h2 { margin: 0; font-size: 16px; font-weight: 600; }
+p { margin: 0; }
+.note { font-size: 14px; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; }
+.field { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.field input { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; min-width: 0; }
+.keyrow { display: flex; gap: 8px; }
+.keyrow input { flex: 1; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { font: inherit; font-weight: 500; font-size: 14px; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; cursor: pointer; min-height: 40px; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn.small { min-height: 34px; padding: 5px 12px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:focus-visible, .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.scan-thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.scan-thumbs:empty { display: none; }
+.scan-thumb { width: 92px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+.scan-thumb img { display: block; width: 100%; height: 116px; object-fit: cover; cursor: zoom-in; }
+.scan-thumb .pdf { height: 116px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--muted); }
+.scan-thumb .tools { display: flex; justify-content: space-between; padding: 3px; }
+.scan-thumb .tools button { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 5px; padding: 1px 8px; cursor: pointer; min-height: 30px; }
+.scan-status { font-size: 14px; min-height: 1.3em; }
+.scan-status.err { color: var(--warn); }
+.scan-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; vertical-align: -2px; margin-right: 6px; }
+@media (prefers-reduced-motion: no-preference) { .scan-spin { animation: scanspin 1s linear infinite; } }
+@keyframes scanspin { to { transform: rotate(360deg); } }
+.chk { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.chk input { margin-top: 3px; }
+textarea.pgn { font: 13px/1.4 var(--font-mono); color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; width: 100%; min-height: 180px; resize: vertical; }
+.photo-view { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.9); display: flex; flex-direction: column; }
+.photo-view[hidden] { display: none; }
+.photo-view .pv-bar { display: flex; gap: 8px; justify-content: flex-end; padding: max(8px, env(safe-area-inset-top, 0px)) 10px 8px; }
+.photo-view .pv-scroll { flex: 1; overflow: auto; }
+.photo-view img { display: block; width: 100%; height: auto; max-width: 1100px; margin: 0 auto; }
+.photo-view.zoom img { width: 250%; max-width: none; }
+footer { font-size: 12px; color: var(--muted); }
+footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Partie z fotky partiáře</h1>
+    <p class="note">Vyfoť zapsaný partiář. Claude (umělá inteligence od Anthropicu) ho přečte, každý tah se ověří podle pravidel a nejistá místa se ukážou ke kontrole. Výsledkem je partie ve formátu PGN.</p>
+  </header>
+
+  <section class="card" aria-labelledby="keyH">
+    <h2 id="keyH">Klíč k Claude API</h2>
+    <div class="keyrow">
+      <input id="keyIn" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-label="Klíč k Claude API">
+      <button class="btn small" id="keyForget" type="button">Zapomenout</button>
+    </div>
+    <p class="note" id="keyNote">Klíč získáš na platform.claude.com (Settings, API keys). Uloží se jen v tomto prohlížeči. Fotka partiáře se posílá ke čtení společnosti Anthropic, přečtení jednoho partiáře stojí obvykle 0,10 až 0,30 USD.</p>
+  </section>
+
+  <section class="card" aria-labelledby="photoH">
+    <h2 id="photoH">Fotka partiáře</h2>
+    <div class="drop" id="drop">
+      <div class="actions">
+        <button class="btn" id="scanCamera" type="button">Vyfotit</button>
+        <button class="btn" id="scanPick" type="button">Vybrat fotku nebo PDF</button>
+      </div>
+      <input type="file" id="scanCameraIn" accept="image/*" capture="environment" hidden>
+      <input type="file" id="scanFileIn" accept="image/*,application/pdf" multiple hidden>
+      <div class="scan-thumbs" id="scanThumbs"></div>
+      <p class="note" id="scanTip">Celý list rovně shora, ostře a bez stínu. Nejvýš 4 strany (třeba obě strany partiáře). Soubory jde sem i přetáhnout.</p>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="scanRead" type="button" disabled>Přečíst partiář</button>
+      <button class="btn" id="scanCancel" type="button" hidden>Zrušit</button>
+    </div>
+    <p class="scan-status" id="scanStatus" role="status"></p>
+  </section>
+
+  <section class="card" id="reviewCard" hidden aria-labelledby="reviewH">
+    <div class="actions" style="justify-content: space-between; align-items: center;">
+      <h2 id="reviewH">Kontrola tahů</h2>
+      <button class="btn small" id="scanPhotoBtn" type="button">Zobrazit fotku</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="optCzech"> Česká notace (J, S, V, D, K)</label>
+    <div id="scanReview"></div>
+  </section>
+
+  <section class="card" id="pgnCard" hidden aria-labelledby="pgnH">
+    <h2 id="pgnH">PGN</h2>
+    <label class="chk"><input type="checkbox" id="scanMark"> <span>Označit nejisté tahy komentářem (zapíše se k nim, co bylo na papíře)</span></label>
+    <textarea class="pgn" id="pgnOut" readonly spellcheck="false" aria-label="Výsledné PGN"></textarea>
+    <div class="actions">
+      <button class="btn primary" id="pgnCopy" type="button">Kopírovat</button>
+      <button class="btn" id="pgnSave" type="button">Stáhnout .pgn</button>
+    </div>
+    <p class="scan-status" id="pgnStatus" role="status"></p>
+  </section>
+
+  <footer>
+    Použité knihovny: chess.js 0.10.3 (© Jeff Hlywa, BSD), Anthropic TypeScript SDK 1.3.0 (© Anthropic, PBC, Apache 2.0). Aplikace je pod licencí GNU GPL 3 nebo novější.
+  </footer>
+</main>
+
+<div class="photo-view" id="photoView" hidden role="dialog" aria-label="Fotka partiáře">
+  <div class="pv-bar">
+    <button class="btn small" id="pvZoom" type="button">Přiblížit</button>
+    <button class="btn small" id="pvNext" type="button" hidden>Další strana</button>
+    <button class="btn small" id="pvClose" type="button">Zavřít</button>
+  </div>
+  <div class="pv-scroll"><img id="pvImg" alt="Fotka partiáře"></div>
+</div>
+
+<script src="vendor/chess.js"></script>
+<script src="vendor/anthropic-sdk.js"></script>
+<script src="scoresheet-core.js"></script>
+<script src="scoresheet-reader.js"></script>
+<script src="scoresheet-review.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set(k, v) { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) {} }
+  };
+  const KEY = 'photo-to-pgn-claude-key';
+  const CZECH = 'photo-to-pgn-czech';
+  const scan = { files: [], review: null, ctrl: null, read: false, photo: 0 };
+
+  function plural(n, one, few, many) { return n === 1 ? one : (n >= 2 && n <= 4 ? few : many); }
+  function status(el, text, kind) {
+    el.textContent = '';
+    el.className = 'scan-status' + (kind === 'err' ? ' err' : '');
+    if (kind === 'busy') el.append(Object.assign(document.createElement('span'), { className: 'scan-spin' }));
+    el.append(text || '');
+  }
+  const scanStatus = (t, k) => status($('scanStatus'), t, k);
+
+  /* ---------- Klíč ---------- */
+  function apiKey() { return $('keyIn').value.trim() || store.get(KEY); }
+  $('keyIn').value = store.get(KEY);
+  $('keyIn').addEventListener('change', e => store.set(KEY, e.target.value.trim()));
+  $('keyForget').addEventListener('click', () => { store.set(KEY, ''); $('keyIn').value = ''; $('keyIn').focus(); });
+
+  /* ---------- Fotky ---------- */
+  function renderThumbs() {
+    const box = $('scanThumbs');
+    box.textContent = '';
+    scan.files.forEach((f, i) => {
+      const t = document.createElement('div');
+      t.className = 'scan-thumb';
+      if (f.kind === 'image') {
+        const img = document.createElement('img');
+        img.src = f.preview; img.alt = 'Strana ' + (i + 1);
+        img.addEventListener('click', () => openPhoto(scan.files.filter(x => x.kind === 'image').indexOf(f)));
+        t.append(img);
+      } else t.append(Object.assign(document.createElement('div'), { className: 'pdf', textContent: 'PDF' }));
+      const tools = document.createElement('div');
+      tools.className = 'tools';
+      const btn = (txt, label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = txt; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', fn); return b; };
+      if (f.kind === 'image') tools.append(btn('↻', 'Otočit stranu ' + (i + 1), async () => { scan.files[i] = await ScoresheetReader.rotateImage(scan.files[i]); renderThumbs(); }));
+      else tools.append(document.createElement('span'));
+      tools.append(btn('✕', 'Odebrat stranu ' + (i + 1), () => { scan.files.splice(i, 1); renderThumbs(); }));
+      t.append(tools);
+      box.append(t);
+    });
+    $('scanRead').disabled = !scan.files.length || !!scan.ctrl;
+    $('scanTip').hidden = scan.files.length > 0;
+  }
+  async function addFiles(list) {
+    for (const f of list) {
+      if (scan.files.length >= ScoresheetReader.MAX_FILES) { scanStatus('Najednou jde poslat nejvýš ' + ScoresheetReader.MAX_FILES + ' strany.', 'err'); break; }
+      if (!/^image\//.test(f.type) && f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name)) { scanStatus('Soubor ' + f.name + ' není fotka ani PDF.', 'err'); continue; }
+      try { scan.files.push(await ScoresheetReader.prepareFile(f)); scanStatus(''); }
+      catch (e) { scanStatus(e.message, 'err'); }
+    }
+    renderThumbs();
+  }
+  $('scanCamera').addEventListener('click', () => $('scanCameraIn').click());
+  $('scanPick').addEventListener('click', () => $('scanFileIn').click());
+  ['scanCameraIn', 'scanFileIn'].forEach(id => $(id).addEventListener('change', e => { addFiles([...(e.target.files || [])]); e.target.value = ''; }));
+  const drop = $('drop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles([...(e.dataTransfer.files || [])]); });
+  document.addEventListener('paste', e => {
+    const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+    if (files.length) addFiles(files);
+  });
+
+  /* ---------- Čtení ---------- */
+  $('scanRead').addEventListener('click', async () => {
+    const key = apiKey();
+    if (!key) { scanStatus('Nejdřív vlož klíč k Claude API.', 'err'); $('keyIn').focus(); return; }
+    store.set(KEY, key);
+    if (scan.read && !confirm('Přečíst znovu? Dosavadní kontrola a opravy přečtené partie se zahodí.')) return;
+    scan.ctrl = new AbortController();
+    $('scanRead').disabled = true; $('scanCancel').hidden = false;
+    const t0 = Date.now();
+    let last = 'Odesílám…';
+    const tick = () => scanStatus(last + ' ' + Math.round((Date.now() - t0) / 1000) + ' s', 'busy');
+    const timer = setInterval(tick, 1000);
+    tick();
+    try {
+      const r = await ScoresheetReader.read({ apiKey: key, files: scan.files, signal: scan.ctrl.signal, onProgress: t => { last = t; tick(); } });
+      if (!scan.review) scan.review = ScoresheetReview.create($('scanReview'), { Chess, czech: $('optCzech').checked, onChange: updatePgn });
+      scan.review.load(r.data);
+      scan.read = true;
+      $('reviewCard').hidden = false; $('pgnCard').hidden = false;
+      $('scanPhotoBtn').hidden = !scan.files.some(f => f.kind === 'image');
+      updatePgn();
+      const cost = ScoresheetReader.estimateCost(r.usage);
+      scanStatus('Přečteno za ' + Math.round((Date.now() - t0) / 1000) + ' s' + (cost != null ? ', cena asi ' + cost.toFixed(2).replace('.', ',') + ' USD' : '') + '.');
+      $('reviewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      scanStatus(e.message, 'err');
+      if (/klíč/i.test(e.message)) $('keyIn').focus();
+    } finally {
+      clearInterval(timer);
+      scan.ctrl = null;
+      $('scanCancel').hidden = true;
+      renderThumbs();
+    }
+  });
+  $('scanCancel').addEventListener('click', () => { if (scan.ctrl) scan.ctrl.abort(); });
+
+  /* ---------- Výsledek ---------- */
+  $('optCzech').checked = store.get(CZECH) === '1';
+  $('optCzech').addEventListener('change', e => { store.set(CZECH, e.target.checked ? '1' : ''); if (scan.review) scan.review.setCzech(e.target.checked); });
+  $('scanMark').addEventListener('change', updatePgn);
+
+  function updatePgn() {
+    if (!scan.review) return;
+    $('pgnOut').value = scan.review.getPgn({ markUncertain: $('scanMark').checked });
+    const st = scan.review.getStats();
+    let msg = '';
+    if (st && st.stopped >= 0) msg = 'Přepis se zastavil, PGN obsahuje jen prvních ' + st.done + ' ' + plural(st.done, 'půltah', 'půltahy', 'půltahů') + '.';
+    else if (st && st.flagged) msg = st.flagged + ' ' + plural(st.flagged, 'tah zůstává', 'tahy zůstávají', 'tahů zůstává') + ' neověřen' + (st.flagged === 1 ? 'ý' : 'é') + '.';
+    status($('pgnStatus'), msg, msg ? 'err' : '');
+  }
+  $('pgnCopy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('pgnOut').value); status($('pgnStatus'), 'PGN je zkopírované.'); }
+    catch (e) { $('pgnOut').select(); status($('pgnStatus'), 'Kopírování se nepovedlo, text je označený, zkopíruj ho ručně.', 'err'); }
+  });
+  $('pgnSave').addEventListener('click', () => {
+    const h = scan.review ? scan.review.getHeaders() : {};
+    // Jméno souboru bez diakritiky, některé prohlížeče jinak název souboru zahodí
+    const part = s => String(s || '').split(',')[0].trim().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const name = [part(h.white), part(h.black)].filter(Boolean).join('-') || 'partie';
+    const blob = new Blob([$('pgnOut').value], { type: 'application/x-chess-pgn' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name + '.pgn';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  /* ---------- Prohlížení fotky ---------- */
+  function images() { return scan.files.filter(f => f.kind === 'image'); }
+  function openPhoto(i) {
+    const imgs = images();
+    if (!imgs.length) return;
+    scan.photo = Math.max(0, Math.min(i || 0, imgs.length - 1));
+    $('pvImg').src = imgs[scan.photo].preview;
+    $('pvNext').hidden = imgs.length < 2;
+    $('photoView').classList.remove('zoom');
+    $('pvZoom').textContent = 'Přiblížit';
+    $('photoView').hidden = false;
+    $('pvClose').focus();
+  }
+  function closePhoto() { $('photoView').hidden = true; }
+  $('scanPhotoBtn').addEventListener('click', () => openPhoto(scan.photo));
+  $('pvClose').addEventListener('click', closePhoto);
+  $('pvNext').addEventListener('click', () => openPhoto((scan.photo + 1) % images().length));
+  $('pvZoom').addEventListener('click', () => {
+    const z = $('photoView').classList.toggle('zoom');
+    $('pvZoom').textContent = z ? 'Celá fotka' : 'Přiblížit';
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('photoView').hidden) closePhoto(); });
+
+  renderThumbs();
+})();
+</script>
+</body>
+</html>
